@@ -39,9 +39,9 @@ Automatically keeps your tabs formatted as `<tab_index>. <folder_name>`, re-numb
  │ (Background listener)│             │ (chpwd / preexec)    │
  │                      │             │                      │
  │ Subscribes to:       │             │ Tracks 'cd' events   │
- │ • tab.closed         │             │ Tracks 'nvim' runs   │
+ │ • tab.closed/created │             │ Tracks 'nvim' runs   │
  │ • tab.moved          │             │ (~15ms execution)    │
- │ • tab.created        │             └──────────────────────┘
+ │ • pane.closed/exited │             └──────────────────────┘
  └──────────────────────┘
 ```
 

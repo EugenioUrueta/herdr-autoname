@@ -14,7 +14,7 @@ import time
 import re
 import signal
 
-SOCKET_PATH = os.path.expanduser("~/.config/herdr/herdr.sock")
+SOCKET_PATH = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
 RUNNING = True
 
 
@@ -38,7 +38,7 @@ def call_api(method, params, timeout=2.0):
     try:
         s.settimeout(timeout)
         s.connect(SOCKET_PATH)
-        payload = {"id": "req_" + str(int(time.time() * 1000)), "method": method, "params": params}
+        payload = {"id": f"req_{time.time_ns()}", "method": method, "params": params}
         s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         buf = ""
         while "\n" not in buf:
@@ -76,8 +76,9 @@ def sync_workspace_tabs():
             tid = p.get("tab_id")
             cwd = p.get("cwd") or p.get("foreground_cwd", "")
             if tid and cwd and tid not in panes_cwd:
-                base = "~" if cwd == os.path.expanduser("~") else os.path.basename(cwd)
-                panes_cwd[tid] = base or cwd
+                clean_cwd = cwd.rstrip("/") if cwd != "/" else "/"
+                base = "~" if clean_cwd == os.path.expanduser("~") else os.path.basename(clean_cwd)
+                panes_cwd[tid] = base or clean_cwd
 
         # Group tabs by workspace
         tabs_by_ws = {}
@@ -95,8 +96,10 @@ def sync_workspace_tabs():
                 m = re.match(r"^\d+\.\s*(.*)$", cur_label)
                 if m and m.group(1).strip():
                     folder = m.group(1).strip()
+                elif cur_label.strip():
+                    folder = cur_label.strip()
                 else:
-                    folder = panes_cwd.get(tid, cur_label) or str(idx)
+                    folder = panes_cwd.get(tid, str(idx))
 
                 expected_label = f"{idx}. {folder}"
                 if cur_label != expected_label:
@@ -107,6 +110,15 @@ def sync_workspace_tabs():
 
 def run_daemon():
     global RUNNING
+    renumber_events = {
+        "tab.closed", "tab_closed",
+        "tab.created", "tab_created",
+        "tab.moved", "tab_moved",
+        "pane.closed", "pane_closed",
+        "pane.exited", "pane_exited",
+        "workspace.closed", "workspace_closed",
+    }
+
     while RUNNING:
         if not os.path.exists(SOCKET_PATH):
             time.sleep(2)
@@ -118,7 +130,7 @@ def run_daemon():
             listener_sock.connect(SOCKET_PATH)
             listener_sock.settimeout(1.0)
 
-            # Subscribe to tab lifecycle events on dedicated streaming connection
+            # Subscribe to tab & pane lifecycle events on dedicated streaming connection
             sub_req = {
                 "id": "stream_sub",
                 "method": "events.subscribe",
@@ -127,6 +139,9 @@ def run_daemon():
                         {"type": "tab.closed"},
                         {"type": "tab.created"},
                         {"type": "tab.moved"},
+                        {"type": "pane.closed"},
+                        {"type": "pane.exited"},
+                        {"type": "workspace.closed"},
                     ]
                 },
             }
@@ -142,6 +157,7 @@ def run_daemon():
                     if not chunk:
                         break
                     buf += chunk.decode("utf-8")
+                    needs_sync = False
                     while "\n" in buf:
                         line, _, buf = buf.partition("\n")
                         line = line.strip()
@@ -150,12 +166,15 @@ def run_daemon():
                         try:
                             data = json.loads(line)
                             evt = data.get("event") or data.get("data", {}).get("type")
-                            if evt in ("tab.closed", "tab_closed", "tab.created", "tab_created", "tab.moved", "tab_moved"):
-                                # Small delay for layout changes to settle in Herdr
-                                time.sleep(0.05)
-                                sync_workspace_tabs()
+                            if evt in renumber_events:
+                                needs_sync = True
                         except json.JSONDecodeError:
                             continue
+
+                    if needs_sync:
+                        # Small delay for layout changes to settle in Herdr
+                        time.sleep(0.08)
+                        sync_workspace_tabs()
                 except socket.timeout:
                     continue
 

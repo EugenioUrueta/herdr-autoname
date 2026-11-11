@@ -50,8 +50,9 @@ if [[ -n "$HERDR_ENV" ]]; then
   _herdr_pane_precmd
 
   # Launch daemon in background if Herdr socket exists and daemon is not yet running
+  local _sock="${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}"
   local _daemon_script="$HOME/.config/herdr/scripts/herdr-autoname-daemon.py"
-  if [[ -S "$HOME/.config/herdr/herdr.sock" && -f "$_daemon_script" ]] && ! pgrep -f "herdr-autoname-daemon.py" >/dev/null 2>&1; then
+  if [[ -S "$_sock" && -f "$_daemon_script" ]] && ! pgrep -f "herdr-autoname-daemon.py" >/dev/null 2>&1; then
     nohup python3 "$_daemon_script" >/dev/null 2>&1 &
   fi
 
